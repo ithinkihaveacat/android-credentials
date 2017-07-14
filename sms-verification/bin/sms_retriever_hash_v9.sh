@@ -5,6 +5,11 @@
 # etc.
 set -o pipefail
 
+if [[ $# -eq 0 ]]; then
+  echo "usage: $0 -k keystore [-p package] [-a alias]"
+  exit 1
+fi
+
 KEYSTORE=
 PACKAGE=com.google.samples.smartlock.sms_verify
 ALIAS=androiddebugkey
@@ -27,13 +32,13 @@ while getopts ":p:k:a:" opt; do
   esac
 done
 
-if [ -z "$KEYSTORE" ]; then
-  echo "error: -k not specified"
+if [[ -z $KEYSTORE ]]; then
+  echo "error: keystore not specified"
   exit 1
 fi
 
-if [ ! -r $KEYSTORE ]; then
-  echo "error: can't read $KEYSTORE"
+if [[ ! -r $KEYSTORE ]]; then
+  echo "error: can't read keystore $KEYSTORE"
   exit 1
 fi  
 
@@ -44,7 +49,7 @@ CERT=$(
   keytool -alias $ALIAS -exportcert -keystore $KEYSTORE | xxd -p | tr -d "[:space:]" # 1. "Get your app's public key certificate"
 )
 
-if [ $? -ne 0 ]; then
+if [[ $? -ne 0 ]]; then
   echo "error: couldn't extract cert from keystore ${KEYSTORE} (maybe alias ${ALIAS} doesn't exist?)"
   exit 1
 fi
@@ -56,12 +61,12 @@ HASH=$(
   cut -c1-11                          # 5. "Your app's hash string is the first 11 characters of the base64-encoded hash."
 )
 
-if [ $? -ne 0 ]; then
+if [[ $? -ne 0 ]]; then
   echo "error: couldn't generate hash from cert"
   exit 1
 fi
 
-echo "Hash string: $HASH"
+echo "SMS verification hash string: $HASH (for package $PACKAGE, using keystore $KEYSTORE, and alias $ALIAS)"
 
 exit 0
 
