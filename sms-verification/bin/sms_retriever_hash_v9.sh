@@ -1,82 +1,73 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
-# ------------------------------------------------------------------
-# [Author] Title
-#          Description
-# ------------------------------------------------------------------
+# If any command in the pipelines (see below) fail, the entire pipeline fails.
+# This improves robustness in the face of missing commands, unexpected output, 
+# etc.
+set -o pipefail
 
-VERSION=0.1.0
-SUBJECT=sms-retriever-hash-generator
-USAGE="Usage: sms_retriever_hash.sh --package package_name --keystore keystore_file"
+KEYSTORE=
+PACKAGE=com.google.samples.smartlock.sms_verify
+ALIAS=androiddebugkey
 
-# --- Options processing -------------------------------------------
-if [ $# == 0 ] ; then
-    echo $USAGE
-    exit 1;
-fi
+while getopts ":p:k:a:" opt; do
+  case $opt in
+    p)
+      PACKAGE=$OPTARG
+      ;;
+    k)
+      KEYSTORE=$OPTARG
+      ;;
+    a)
+      ALIAS=$OPTARG
+      ;;
+    \?)
+      echo "error: invalid option -$OPTARG"
+      exit 1
+      ;;
+  esac
+done
 
-# USE: apkblacklister.sh --source source.apk --target target.apk more files to scan
-
-if [[ "$1" != "--package" ]]; then
-  echo "Error: expected --package as first parameter"
+if [ -z "$KEYSTORE" ]; then
+  echo "error: -k not specified"
   exit 1
 fi
-pkg="$2"
-shift 2
 
-if [[ "$1" != "--keystore" ]]; then
-  echo "Error: expected --keystore as third parameter"
+if [ ! -r $KEYSTORE ]; then
+  echo "error: can't read $KEYSTORE"
+  exit 1
+fi  
+
+# Generate hash as per algorithm at:
+# https://developers.google.com/identity/sms-retriever/verify#computing_your_apps_hash_string
+
+CERT=$(
+  keytool -alias $ALIAS -exportcert -keystore $KEYSTORE | xxd -p | tr -d "[:space:]" # 1. "Get your app's public key certificate"
+)
+
+if [ $? -ne 0 ]; then
+  echo "error: couldn't extract cert from keystore ${KEYSTORE} (maybe alias ${ALIAS} doesn't exist?)"
   exit 1
 fi
-keystore="$2"
-shift 2
 
+HASH=$(
+  printf "%s %s" ${PACKAGE} ${CERT} | # 2. "Append the hex string to your app's package name, separated by a single space."
+  shasum -a 256 |                     # 3. "Compute the SHA-256 sum of the combined string."
+  cut -c1-64 | xxd -r -p | base64 |   # 4. "Base64-encode the binary value of the SHA-256 sum."
+  cut -c1-11                          # 5. "Your app's hash string is the first 11 characters of the base64-encoded hash."
+)
 
-
-echo
-echo "package name: $pkg"
-echo "keystore file: $keystore"
-echo 
-
-if [ -e "$keystore" ]
-then
-  echo "File $keystore is found."
-  echo
-else
-  echo "File $keystore is not found."
-  echo
-  exit 0;
+if [ $? -ne 0 ]; then
+  echo "error: couldn't generate hash from cert"
+  exit 1
 fi
 
-# Retrieve certificate from keystore file. Decoded with Base64 and converted to hex
-cert=$(keytool -list -rfc -keystore $keystore | sed  -e '1,/BEGIN/d' | sed -e '/END/,$d' | tr -d ' \n' | base64 --decode | xxd -p | tr -d ' \n')
+echo "Hash string: $HASH"
 
-echo
-echo "certificate in hex: $cert"
+exit 0
 
-
-# concatenate input
-input="$pkg $cert"
-
-# 256 bits = 32 bytes = 64 hex chars
-output=$(printf "$input" | shasum -a 256 | cut -c1-64)
-echo
-echo "SHA-256 output in hex: $output"
-
-# take the beginning 72 bits (= 9 bytes = 18 hex chars)
-output=$(printf $output | cut -c1-18)
-
-# encode sha256sum output by base64 (11 chars)
-base64output=$(printf $output | xxd -r -p | base64 | cut -c1-11)
-echo
-echo "First 8 bytes encoded by base64: $base64output"
-echo
-echo "SMS Retriever hash code:  $base64output"
-echo
-
-
-
-
-
-
-
+# Debugging
+echo "CERT = $CERT"
+echo "PACKAGE = $PACKAGE"
+echo "KEYSTORE = $KEYSTORE"
+echo "ALIAS = $ALIAS"
+echo "HASH = $HASH"
